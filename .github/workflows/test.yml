@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test_and_build:
+    name: Test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+      fail-fast: false
+    env:
+      RUST_BACKTRACE: 1
+
+    steps:
+      - name: ✅ Checkout
+        uses: actions/checkout@v3
+      - name: ⚙️ Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: ⚡ Cache
+        uses: actions/cache@v2.1.4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: cargo-${{ runner.os }}
+      - name: 🔎 Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
