@@ -1,6 +1,6 @@
 # `minidumper-child` 
 
-![Master branch integration test status](https://img.shields.io/github/workflow/status/timfish/minidumper-child/Test/main?label=Integration%20Tests&style=for-the-badge)
+![Master branch integration test status](https://img.shields.io/github/actions/workflow/status/timfish/minidumper-child/test.yml?label=Integration%20Tests&style=for-the-badge)
 
 Essentially takes the code from the `minidumper` [diskwrite
 example](https://github.com/EmbarkStudios/crash-handling/blob/main/minidumper/examples/diskwrite.rs)
