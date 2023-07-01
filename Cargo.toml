@@ -5,13 +5,13 @@ license = "MIT OR Apache-2.0"
 name = "minidumper-child"
 readme = "README.md"
 repository = "https://github.com/timfish/minidumper-child"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
-crash-handler = "0.4"
-minidumper = "0.6"
+crash-handler = "0.6"
+minidumper = "0.8"
 thiserror = "1"
 uuid = {version = "1", features = ["v4"]}
 
 [dev-dependencies]
-sadness-generator = "0.4"
+sadness-generator = "0.5"

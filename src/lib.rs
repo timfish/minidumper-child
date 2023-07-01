@@ -31,7 +31,6 @@ impl ClientHandle {
 
 pub type OnMinidump = Box<dyn Fn(Vec<u8>, &Path) + Send + Sync + 'static>;
 pub type OnMessage = Box<dyn Fn(u32, Vec<u8>) + Send + Sync + 'static>;
-pub type OnFlush = Box<dyn Fn() + Send + Sync + 'static>;
 
 pub struct MinidumperChild {
     crashes_dir: PathBuf,
@@ -56,7 +55,7 @@ impl Default for MinidumperChild {
 }
 
 impl MinidumperChild {
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn new() -> Self {
         Self::default()
     }
@@ -65,7 +64,7 @@ impl MinidumperChild {
         std::env::args().any(|arg| arg.starts_with(&self.server_arg))
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn on_minidump<F>(mut self, on_minidump: F) -> Self
     where
         F: Fn(Vec<u8>, &Path) + Send + Sync + 'static,
@@ -74,7 +73,7 @@ impl MinidumperChild {
         self
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn on_message<F>(mut self, on_message: F) -> Self
     where
         F: Fn(u32, Vec<u8>) + Send + Sync + 'static,
@@ -83,31 +82,31 @@ impl MinidumperChild {
         self
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_crashes_dir(mut self, crashes_dir: PathBuf) -> Self {
         self.crashes_dir = crashes_dir;
         self
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_server_stale_timeout(mut self, server_stale_timeout: u64) -> Self {
         self.server_stale_timeout = server_stale_timeout;
         self
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_client_connect_timeout(mut self, client_connect_timeout: u64) -> Self {
         self.client_connect_timeout = client_connect_timeout;
         self
     }
 
-    #[must_use = "You should call start() or the crash reporter won't be enabled"]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_server_arg(mut self, server_arg: String) -> Self {
         self.server_arg = server_arg;
         self
     }
 
-    #[must_use = "The return value of start() should not be dropped until the program exits"]
+    #[must_use = "The return value of spawn() should not be dropped until the program exits"]
     pub fn spawn(self) -> Result<ClientHandle, Error> {
         if self.on_minidump.is_none() && self.on_message.is_none() {
             panic!("You should set one of 'on_minidump' or 'on_message'");
