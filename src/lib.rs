@@ -4,8 +4,8 @@ use std::{
     sync::Arc,
 };
 
-mod client;
-mod server;
+pub mod client;
+pub mod server;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
