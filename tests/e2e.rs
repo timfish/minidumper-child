@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 #[test]
 fn test_example_app() {
     let output = Command::new("cargo")
-        .args(["run", "--example", "test"])
+        .args(["run", "--example", "test", "--release"])
         .stdout(Stdio::piped())
         .spawn()
         .expect("should spawn tests app")
