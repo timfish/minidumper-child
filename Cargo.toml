@@ -8,10 +8,10 @@ repository = "https://github.com/timfish/minidumper-child"
 version = "0.2.2"
 
 [dependencies]
-crash-handler = "0.6"
-minidumper = "0.8"
-thiserror = "1"
-uuid = {version = "1", features = ["v4"]}
+crash-handler = "0.7.0"
+minidumper = "0.9.0"
+thiserror = "2.0.18"
+uuid = { version = "1.21.0", features = ["v4"] }
 
 [dev-dependencies]
-sadness-generator = "0.5"
+sadness-generator = "0.7.0"
