@@ -99,7 +99,7 @@ where
     Minidump: Fn(Vec<u8>, &Path) + Send + Sync + 'static,
     Message: Fn(u32, Vec<u8>) + Send + Sync + 'static,
 {
-    Server::with_name(socket_name)
+    Server::with_name(crate::to_socket_name(socket_name))
         .map_err(Error::from)
         .and_then(|mut server| {
             let handler = Box::new(Handler::new(crashes_dir, on_minidump, on_message));

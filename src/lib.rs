@@ -157,6 +157,17 @@ impl MinidumperChild {
     }
 }
 
+pub(crate) fn to_socket_name(s: &str) -> minidumper::SocketName<'_> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        minidumper::SocketName::Abstract(s)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        minidumper::SocketName::Path(std::path::Path::new(s))
+    }
+}
+
 pub fn make_socket_name(session_id: uuid::Uuid) -> String {
     if cfg!(any(target_os = "linux", target_os = "android")) {
         format!("temp-socket-{}", session_id.simple())

@@ -13,7 +13,7 @@ pub fn start(
 
     // Loop until we have a client or return error if connect_timeout is reached
     let client = loop {
-        match minidumper::Client::with_name(socket_name).map(Arc::new) {
+        match minidumper::Client::with_name(crate::to_socket_name(socket_name)).map(Arc::new) {
             Ok(client) => break client,
             Err(e) => {
                 if wait_time < connect_timeout {

@@ -9,8 +9,8 @@ version = "0.2.2"
 
 [dependencies]
 crash-handler = "0.6"
-minidumper = "0.8"
-thiserror = "1"
+minidumper = "0.9"
+thiserror = "2"
 uuid = {version = "1", features = ["v4"]}
 
 [dev-dependencies]
