@@ -1,4 +1,4 @@
-use minidumper::{LoopAction, MinidumpBinary, Server, ServerHandler};
+use minidumper::{LoopAction, MinidumpBinary, Server, ServerHandler, SocketName};
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
@@ -89,7 +89,7 @@ where
 }
 
 pub fn start<Minidump, Message>(
-    socket_name: &str,
+    socket_name: SocketName,
     crashes_dir: PathBuf,
     stale_timeout: u64,
     on_minidump: Option<Minidump>,
