@@ -114,11 +114,13 @@ impl MinidumperChild {
 
         let server_socket = std::env::args()
             .find(|arg| arg.starts_with(&self.server_arg))
-            .and_then(|arg| arg.split('=').last().map(|arg| arg.to_string()));
+            .and_then(|arg| arg.split('=').next_back().map(|arg| arg.to_string()));
 
         if let Some(socket_name) = server_socket {
+            let socket_name = minidumper::SocketName::path(&socket_name);
+
             server::start(
-                &socket_name,
+                socket_name,
                 self.crashes_dir,
                 self.server_stale_timeout,
                 self.on_minidump,
@@ -142,7 +144,7 @@ impl MinidumperChild {
                 .map_err(Error::from)
                 .and_then(|server_process| {
                     client::start(
-                        &socket_name,
+                        minidumper::SocketName::path(&socket_name),
                         self.client_connect_timeout,
                         server_process.id(),
                         self.server_stale_timeout / 2,

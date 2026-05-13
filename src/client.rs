@@ -1,10 +1,10 @@
 use crate::Error;
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
-use minidumper::Client;
+use minidumper::{Client, SocketName};
 use std::{sync::Arc, time::Duration};
 
 pub fn start(
-    socket_name: &str,
+    socket_name: SocketName,
     connect_timeout: u64,
     #[allow(unused_variables)] server_pid: u32,
     server_poll: u64,
