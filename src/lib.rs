@@ -142,7 +142,7 @@ impl MinidumperChild {
             panic!("You should set one of 'on_minidump' or 'on_message'");
         }
 
-        if let Some(socket_name) = std::env::var(&self.server_env).ok() {
+        if let Ok(socket_name) = std::env::var(&self.server_env) {
             let socket_name = minidumper::SocketName::path(&socket_name);
 
             server::start(
