@@ -1,4 +1,5 @@
 use std::{
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process,
     sync::Arc,
@@ -16,6 +17,8 @@ pub enum Error {
     CrashHandler(#[from] crash_handler::Error),
     #[error(transparent)]
     Minidumper(#[from] minidumper::Error),
+    #[error("Invalid socket name: {0:?}")]
+    InvalidSocketName(OsString),
 }
 
 pub struct ClientHandle {
@@ -142,11 +145,12 @@ impl MinidumperChild {
             panic!("You should set one of 'on_minidump' or 'on_message'");
         }
 
-        if let Ok(socket_name) = std::env::var(&self.server_env) {
-            let socket_name = minidumper::SocketName::path(&socket_name);
+        if let Some(socket_name) = std::env::var_os(&self.server_env) {
+            let socket_name = OwnedSocketName::from_os_str(&socket_name)
+                .ok_or(Error::InvalidSocketName(socket_name))?;
 
             server::start(
-                socket_name,
+                socket_name.as_ref(),
                 self.crashes_dir,
                 self.server_stale_timeout,
                 self.on_minidump,
@@ -159,7 +163,7 @@ impl MinidumperChild {
         } else {
             // We use a unique socket name because we don't share the crash reporter
             // processes between different instances of the app.
-            let socket_name = make_socket_name(uuid::Uuid::new_v4());
+            let socket_name = OwnedSocketName::new(&std::env::temp_dir(), uuid::Uuid::new_v4());
 
             std::env::current_exe()
                 .and_then(|current_exe| {
@@ -168,13 +172,13 @@ impl MinidumperChild {
                         on_process(&mut process);
                     }
                     // Always set this last, so an accidental `env_clear()` doesn't remove it.
-                    process.env(self.server_env, &socket_name);
+                    process.env(self.server_env, socket_name.as_os_string());
                     process.spawn()
                 })
                 .map_err(Error::from)
                 .and_then(|server_process| {
                     client::start(
-                        minidumper::SocketName::path(&socket_name),
+                        socket_name.as_ref(),
                         self.client_connect_timeout,
                         server_process.id(),
                         self.server_stale_timeout / 2,
@@ -189,8 +193,128 @@ impl MinidumperChild {
     }
 }
 
-pub fn make_socket_name(session_id: uuid::Uuid) -> String {
-    let mut td = std::env::temp_dir();
-    td.push(format!("temp-socket-{}", session_id.simple()));
-    td.to_string_lossy().to_string()
+/// An owned version of [SocketName](minidumper::SocketName).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OwnedSocketName {
+    Path(PathBuf),
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    Abstract(String),
+}
+
+impl OwnedSocketName {
+    const PATH_PREFIX: &str = "path:";
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const ABSTRACT_PREFIX: &str = "abstract:";
+
+    fn new(base_dir: &Path, session_id: uuid::Uuid) -> Self {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            return Self::Abstract(format!("temp-socket-{}", session_id.simple()));
+        }
+
+        let mut path = base_dir.to_path_buf();
+        path.push(format!("temp-socket-{}", session_id.simple()));
+        Self::Path(path)
+    }
+
+    fn as_ref(&self) -> minidumper::SocketName<'_> {
+        match self {
+            Self::Path(p) => minidumper::SocketName::Path(p.as_path()),
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::Abstract(s) => minidumper::SocketName::Abstract(s.as_str()),
+        }
+    }
+
+    fn as_os_string(&self) -> OsString {
+        match self {
+            Self::Path(p) => {
+                let mut out = OsString::from(Self::PATH_PREFIX.to_string());
+                out.push(p);
+                out
+            }
+
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::Abstract(s) => {
+                let mut out = OsString::from(Self::ABSTRACT_PREFIX.to_string());
+                out.push(s);
+                out
+            }
+        }
+    }
+
+    fn from_os_str(os_str: &OsStr) -> Option<Self> {
+        let strip_prefix = |prefix: &OsStr| -> Option<&OsStr> {
+            let rest = os_str
+                .as_encoded_bytes()
+                .strip_prefix(prefix.as_encoded_bytes())?;
+            // SAFETY: The bytes we are passing in were originally an `OsStr`. We only
+            // stripped off a prefix that was also an `OsStr`.
+            unsafe { Some(OsStr::from_encoded_bytes_unchecked(rest)) }
+        };
+
+        let path_prefix: &OsStr = OsStr::new(Self::PATH_PREFIX);
+
+        if let Some(path) = strip_prefix(path_prefix) {
+            return Some(Self::Path(PathBuf::from(path)));
+        }
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let abstract_prefix: &OsStr = OsStr::new(Self::ABSTRACT_PREFIX);
+
+            if let Some(name) = strip_prefix(abstract_prefix) {
+                let name = name.to_str()?.to_owned();
+                return Some(Self::Abstract(name));
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+
+    use uuid::Uuid;
+
+    use crate::OwnedSocketName;
+
+    #[test]
+    fn owned_socket_name_roundtrip_new() {
+        let sn = OwnedSocketName::new("/tmp".as_ref(), Uuid::new_v4());
+        let os_str = sn.as_os_string();
+        assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
+    }
+
+    #[test]
+    fn owned_socket_name_roundtrip_path_utf8() {
+        let sn = OwnedSocketName::Path("/tmp/mysocket".into());
+        let os_str = sn.as_os_string();
+        assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_socket_name_roundtrip_path_unix() {
+        use std::os::unix::ffi::OsStrExt;
+        // Example of a non-UTF-8 path from stdlib docs:
+        // Here, the values 0x66 and 0x6f correspond to 'f' and 'o'
+        // respectively. The value 0x80 is a lone continuation byte, invalid
+        // in a UTF-8 sequence.
+        let source = [0x66, 0x6f, 0x80, 0x6f];
+        let path = OsStr::from_bytes(&source[..]);
+        let sn = OwnedSocketName::Path(PathBuf::from(path));
+        let os_str = sn.as_os_string();
+        assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn owned_socket_name_roundtrip_abstract() {
+        let sn = OwnedSocketName::Abstract("my-tmp-socket".into());
+        let os_str = sn.as_os_string();
+        assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
+    }
 }
