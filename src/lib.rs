@@ -243,15 +243,18 @@ impl OwnedSocketName {
     }
 
     fn from_os_str(os_str: &OsStr) -> Option<Self> {
-        let path_prefix: &OsStr = OsStr::new(Self::PATH_PREFIX);
-
-        if let Some(path) = os_str
-            .as_encoded_bytes()
-            .strip_prefix(path_prefix.as_encoded_bytes())
-        {
+        let strip_prefix = |prefix: &OsStr| -> Option<&OsStr> {
+            let rest = os_str
+                .as_encoded_bytes()
+                .strip_prefix(prefix.as_encoded_bytes())?;
             // SAFETY: The bytes we are passing in were originally an `OsStr`. We only
             // stripped off a prefix that was also an `OsStr`.
-            let path = unsafe { OsStr::from_encoded_bytes_unchecked(path) };
+            unsafe { Some(OsStr::from_encoded_bytes_unchecked(rest)) }
+        };
+
+        let path_prefix: &OsStr = OsStr::new(Self::PATH_PREFIX);
+
+        if let Some(path) = strip_prefix(path_prefix) {
             return Some(Self::Path(PathBuf::from(path)));
         }
 
@@ -259,13 +262,7 @@ impl OwnedSocketName {
         {
             let abstract_prefix: &OsStr = OsStr::new(Self::ABSTRACT_PREFIX);
 
-            if let Some(name) = os_str
-                .as_encoded_bytes()
-                .strip_prefix(abstract_prefix.as_encoded_bytes())
-            {
-                // SAFETY: The bytes we are passing in were originally an `OsStr`. We only
-                // stripped off a prefix that was also an `OsStr`.
-                let name = unsafe { OsStr::from_encoded_bytes_unchecked(name) };
+            if let Some(name) = strip_prefix(abstract_prefix) {
                 let name = name.to_str()?.to_owned();
                 return Some(Self::Abstract(name));
             }
