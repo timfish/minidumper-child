@@ -11,14 +11,28 @@ pub mod server;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-    #[error(transparent)]
-    CrashHandler(#[from] crash_handler::Error),
-    #[error(transparent)]
-    Minidumper(#[from] minidumper::Error),
     #[error("Invalid socket name: {0:?}")]
     InvalidSocketName(OsString),
+    #[error("Failed to spawn process")]
+    SpawnProcess(#[source] std::io::Error),
+    #[error("Failed to attach crash handler")]
+    AttachCrashHandler(#[source] crash_handler::Error),
+    #[error("Faled to send message")]
+    SendMessage(#[source] minidumper::Error),
+    #[error("Failed to create client with socket name {socket_name:?}")]
+    CreateClient {
+        #[source]
+        source: minidumper::Error,
+        socket_name: OwnedSocketName,
+    },
+    #[error("Failed to create server with socket name {socket_name:?}")]
+    CreateServer {
+        #[source]
+        source: minidumper::Error,
+        socket_name: OwnedSocketName,
+    },
+    #[error("Error while running server")]
+    RunServer(#[source] minidumper::Error),
 }
 
 pub struct ClientHandle {
@@ -29,7 +43,9 @@ pub struct ClientHandle {
 
 impl ClientHandle {
     pub fn send_message(&self, kind: u32, buf: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.client.send_message(kind, buf).map_err(Error::from)
+        self.client
+            .send_message(kind, buf)
+            .map_err(Error::SendMessage)
     }
 }
 
@@ -150,7 +166,7 @@ impl MinidumperChild {
                 .ok_or(Error::InvalidSocketName(socket_name))?;
 
             server::start(
-                socket_name.as_ref(),
+                socket_name,
                 self.crashes_dir,
                 self.server_stale_timeout,
                 self.on_minidump,
@@ -175,10 +191,10 @@ impl MinidumperChild {
                     process.env(self.server_env, socket_name.as_os_string());
                     process.spawn()
                 })
-                .map_err(Error::from)
+                .map_err(Error::SpawnProcess)
                 .and_then(|server_process| {
                     client::start(
-                        socket_name.as_ref(),
+                        socket_name,
                         self.client_connect_timeout,
                         server_process.id(),
                         self.server_stale_timeout / 2,
@@ -195,7 +211,7 @@ impl MinidumperChild {
 
 /// An owned version of [SocketName](minidumper::SocketName).
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum OwnedSocketName {
+pub enum OwnedSocketName {
     Path(PathBuf),
     #[cfg(any(target_os = "linux", target_os = "android"))]
     Abstract(String),
