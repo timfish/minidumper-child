@@ -277,6 +277,9 @@ impl OwnedSocketName {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+
     use uuid::Uuid;
 
     use crate::OwnedSocketName;
@@ -289,8 +292,23 @@ mod tests {
     }
 
     #[test]
-    fn owned_socket_name_roundtrip_path() {
+    fn owned_socket_name_roundtrip_path_utf8() {
         let sn = OwnedSocketName::Path("/tmp/mysocket".into());
+        let os_str = sn.as_os_string();
+        assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_socket_name_roundtrip_path_unix() {
+        use std::os::unix::ffi::OsStrExt;
+        // Example of a non-UTF-8 path from stdlib docs:
+        // Here, the values 0x66 and 0x6f correspond to 'f' and 'o'
+        // respectively. The value 0x80 is a lone continuation byte, invalid
+        // in a UTF-8 sequence.
+        let source = [0x66, 0x6f, 0x80, 0x6f];
+        let path = OsStr::from_bytes(&source[..]);
+        let sn = OwnedSocketName::Path(PathBuf::from(path));
         let os_str = sn.as_os_string();
         assert_eq!(OwnedSocketName::from_os_str(&os_str).unwrap(), sn);
     }
