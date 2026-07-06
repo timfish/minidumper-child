@@ -1,4 +1,4 @@
-use minidumper::{LoopAction, MinidumpBinary, Server, ServerHandler, SocketName};
+use minidumper::{LoopAction, MinidumpBinary, Server, ServerHandler};
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use crate::Error;
+use crate::{Error, OwnedSocketName};
 
 struct Handler<Minidump, Message>
 where
@@ -89,7 +89,7 @@ where
 }
 
 pub fn start<Minidump, Message>(
-    socket_name: SocketName,
+    socket_name: OwnedSocketName,
     crashes_dir: PathBuf,
     stale_timeout: Duration,
     on_minidump: Option<Minidump>,
@@ -99,8 +99,11 @@ where
     Minidump: Fn(Vec<u8>, &Path) + Send + Sync + 'static,
     Message: Fn(u32, Vec<u8>) + Send + Sync + 'static,
 {
-    Server::with_name(socket_name)
-        .map_err(Error::from)
+    Server::with_name(socket_name.as_ref())
+        .map_err(|err| Error::CreateServer {
+            source: err,
+            socket_name,
+        })
         .and_then(|mut server| {
             let handler = Box::new(Handler::new(crashes_dir, on_minidump, on_message));
             let shutdown = AtomicBool::new(false);
@@ -108,6 +111,6 @@ where
 
             server
                 .run(handler, &shutdown, stale_timeout)
-                .map_err(Error::from)
+                .map_err(Error::RunServer)
         })
 }

@@ -1,10 +1,10 @@
-use crate::Error;
+use crate::{Error, OwnedSocketName};
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
-use minidumper::{Client, SocketName};
+use minidumper::Client;
 use std::{sync::Arc, time::Duration};
 
 pub fn start(
-    socket_name: SocketName,
+    socket_name: OwnedSocketName,
     connect_timeout: Duration,
     #[allow(unused_variables)] server_pid: u32,
     server_poll: Duration,
@@ -13,7 +13,7 @@ pub fn start(
 
     // Loop until we have a client or return error if connect_timeout is reached
     let client = loop {
-        match minidumper::Client::with_name(socket_name).map(Arc::new) {
+        match minidumper::Client::with_name(socket_name.as_ref()).map(Arc::new) {
             Ok(client) => break client,
             Err(e) => {
                 if wait_time < connect_timeout {
@@ -21,7 +21,10 @@ pub fn start(
                     std::thread::sleep(wait);
                     wait_time += wait;
                 } else {
-                    return Err(Error::from(e));
+                    return Err(Error::CreateClient {
+                        source: e,
+                        socket_name,
+                    });
                 }
             }
         }
@@ -45,7 +48,8 @@ pub fn start(
             client.ping().ok();
             CrashEventResult::Handled(client.request_dump(crash_context).is_ok())
         })
-    })?;
+    })
+    .map_err(Error::AttachCrashHandler)?;
 
     // On linux we can explicitly allow only the server process to inspect the
     // process we are monitoring (this one) for crashes
