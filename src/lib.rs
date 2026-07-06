@@ -190,15 +190,7 @@ impl MinidumperChild {
 }
 
 pub fn make_socket_name(session_id: uuid::Uuid) -> String {
-    if cfg!(any(target_os = "linux", target_os = "android")) {
-        format!("temp-socket-{}", session_id.simple())
-    } else {
-        // For platforms without abstract uds, put the pipe in the
-        // temporary directory so that the OS can clean it up, rather than
-        // polluting the cwd due to annoying file deletion problems,
-        // particularly on Windows
-        let mut td = std::env::temp_dir();
-        td.push(format!("temp-socket-{}", session_id.simple()));
-        td.to_string_lossy().to_string()
-    }
+    let mut td = std::env::temp_dir();
+    td.push(format!("temp-socket-{}", session_id.simple()));
+    td.to_string_lossy().to_string()
 }
