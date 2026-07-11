@@ -13,5 +13,15 @@ minidumper = "0.10"
 thiserror = "2"
 uuid = {version = "1", features = ["v4"]}
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Must stay in sync with the version used by minidumper so the error types match
+crash-context = "0.6"
+
 [dev-dependencies]
 sadness-generator = "0.7"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
