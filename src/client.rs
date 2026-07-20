@@ -6,11 +6,6 @@ use std::{
     time::Duration,
 };
 
-/// `mach_msg` receive error returned when the message is larger than the
-/// provided buffer, in which case the message has arrived but is destroyed.
-#[cfg(target_os = "macos")]
-const MACH_RCV_TOO_LARGE: i32 = 0x1000_4004;
-
 /// The connection to the crash reporter server.
 ///
 /// `ping` and `request_dump` both read a response from the socket, so all
@@ -72,22 +67,7 @@ impl ServerConnection {
         // than no dump at all.
         let _guard = try_lock_briefly(&self.io_lock);
 
-        match self.current_client().request_dump(crash_context) {
-            Ok(()) => true,
-            // The ack from the server is always received with
-            // MACH_RCV_TOO_LARGE because crash-context does not leave room
-            // for the trailer the kernel appends to received messages. The
-            // error still only occurs once the ack has arrived, which means
-            // the dump has been written, so it's safe to treat as success.
-            #[cfg(target_os = "macos")]
-            Err(minidumper::Error::PortError(crash_context::ipc::Error::Message(code)))
-                if code == MACH_RCV_TOO_LARGE =>
-            {
-                true
-            }
-
-            Err(_) => false,
-        }
+        self.current_client().request_dump(crash_context).is_ok()
     }
 
     fn reconnect(&self) -> bool {
