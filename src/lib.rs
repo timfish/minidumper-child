@@ -8,6 +8,8 @@ use std::{
 
 pub mod client;
 pub mod server;
+#[cfg(unix)]
+mod snapshot;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -33,19 +35,38 @@ pub enum Error {
     },
     #[error("Error while running server")]
     RunServer(#[source] minidumper::Error),
+    #[error("Failed to capture minidump snapshot")]
+    CaptureMinidump,
+    #[cfg(unix)]
+    #[error("Failed to install snapshot signal handler")]
+    InstallSnapshotSignal(#[source] std::io::Error),
 }
 
 pub struct ClientHandle {
-    client: Arc<minidumper::Client>,
-    _handler: crash_handler::CrashHandler,
+    conn: Arc<client::ServerConnection>,
+    handler: Arc<crash_handler::CrashHandler>,
     _child: process::Child,
 }
 
 impl ClientHandle {
     pub fn send_message(&self, kind: u32, buf: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.client
+        self.conn
             .send_message(kind, buf)
             .map_err(Error::SendMessage)
+    }
+
+    /// Captures a minidump of the current process without crashing it.
+    ///
+    /// This invokes the same pipeline as a real crash, so the `on_minidump`
+    /// callback is called with the resulting minidump. It blocks until the
+    /// crash reporter process has written the dump and the callback has
+    /// completed, and then the process continues running.
+    pub fn capture_minidump(&self) -> Result<(), Error> {
+        if client::capture_minidump(&self.handler, &self.conn) {
+            Ok(())
+        } else {
+            Err(Error::CaptureMinidump)
+        }
     }
 }
 
@@ -61,6 +82,8 @@ pub struct MinidumperChild {
     on_process: Option<OnProcess>,
     on_minidump: Option<OnMinidump>,
     on_message: Option<OnMessage>,
+    #[cfg(unix)]
+    snapshot_signal: Option<i32>,
 }
 
 impl Default for MinidumperChild {
@@ -73,6 +96,8 @@ impl Default for MinidumperChild {
             on_process: None,
             on_minidump: None,
             on_message: None,
+            #[cfg(unix)]
+            snapshot_signal: None,
         }
     }
 }
@@ -155,6 +180,20 @@ impl MinidumperChild {
         self
     }
 
+    /// Configures a signal (e.g. `SIGUSR2`) which captures a minidump of the
+    /// app process without exiting it.
+    ///
+    /// This must not be one of the fatal signals already handled by
+    /// `crash-handler` (`SIGABRT`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGSEGV`,
+    /// `SIGTRAP`) as those always terminate the process after the dump is
+    /// captured.
+    #[cfg(unix)]
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
+    pub fn with_snapshot_signal(mut self, signal: i32) -> Self {
+        self.snapshot_signal = Some(signal);
+        self
+    }
+
     #[must_use = "The return value of spawn() should not be dropped until the program exits"]
     pub fn spawn(self) -> Result<ClientHandle, Error> {
         if self.on_minidump.is_none() && self.on_message.is_none() {
@@ -199,11 +238,25 @@ impl MinidumperChild {
                         server_process.id(),
                         self.server_stale_timeout / 2,
                     )
-                    .map(|(client, handler)| ClientHandle {
-                        client,
-                        _handler: handler,
+                    .map(|(conn, handler)| ClientHandle {
+                        conn,
+                        handler: Arc::new(handler),
                         _child: server_process,
                     })
+                })
+                .and_then(|handle| {
+                    #[cfg(unix)]
+                    if let Some(signal) = self.snapshot_signal {
+                        // The thread only holds weak references so that dropping
+                        // the ClientHandle still detaches the crash handler.
+                        snapshot::bind_signal(
+                            signal,
+                            Arc::downgrade(&handle.handler),
+                            Arc::downgrade(&handle.conn),
+                        )
+                        .map_err(Error::InstallSnapshotSignal)?;
+                    }
+                    Ok(handle)
                 })
         }
     }

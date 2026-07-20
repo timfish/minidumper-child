@@ -8,10 +8,16 @@ repository = "https://github.com/timfish/minidumper-child"
 version = "0.5.0"
 
 [dependencies]
-crash-handler = "0.7"
-minidumper = "0.10"
+crash-handler = "0.8"
+minidumper = "0.11"
 thiserror = "2"
 uuid = {version = "1", features = ["v4"]}
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 sadness-generator = "0.7"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
