@@ -11,6 +11,8 @@ pub mod server;
 #[cfg(unix)]
 mod snapshot;
 
+pub use crash_handler::CrashContext;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Invalid socket name: {0:?}")]
@@ -70,9 +72,24 @@ impl ClientHandle {
     }
 }
 
+/// Sends messages to the crash reporter from inside the crash handler.
+///
+/// Passed to the [`on_crash`](MinidumperChild::on_crash) callback. Each call
+/// is a single vectored write of the caller's buffer and allocates nothing.
+pub struct MessageSender<'a>(&'a minidumper::Client);
+
+impl MessageSender<'_> {
+    /// Sends a message that arrives at [`on_message`](MinidumperChild::on_message)
+    /// in the crash reporter before the minidump is written.
+    pub fn send_message(&self, kind: u32, buf: &[u8]) -> Result<(), Error> {
+        self.0.send_message(kind, buf).map_err(Error::SendMessage)
+    }
+}
+
 pub type OnProcess = Box<dyn FnOnce(&mut process::Command) + Send + Sync + 'static>;
 pub type OnMinidump = Box<dyn Fn(Vec<u8>, &Path) + Send + Sync + 'static>;
 pub type OnMessage = Box<dyn Fn(u32, Vec<u8>) + Send + Sync + 'static>;
+pub type OnCrash = Box<dyn Fn(&CrashContext, &MessageSender<'_>) + Send + Sync + 'static>;
 
 pub struct MinidumperChild {
     crashes_dir: PathBuf,
@@ -84,6 +101,7 @@ pub struct MinidumperChild {
     on_message: Option<OnMessage>,
     #[cfg(unix)]
     snapshot_signal: Option<i32>,
+    on_crash: Option<OnCrash>,
 }
 
 impl Default for MinidumperChild {
@@ -98,6 +116,7 @@ impl Default for MinidumperChild {
             on_message: None,
             #[cfg(unix)]
             snapshot_signal: None,
+            on_crash: None,
         }
     }
 }
@@ -142,6 +161,34 @@ impl MinidumperChild {
         F: Fn(u32, Vec<u8>) + Send + Sync + 'static,
     {
         self.on_message = Some(Box::new(on_message));
+        self
+    }
+
+    /// Configures a callback which runs in the app process when it crashes,
+    /// before the minidump is requested.
+    ///
+    /// The callback receives the [`CrashContext`], which names the crashing
+    /// thread, and a [`MessageSender`]. Messages sent from here reach
+    /// [`on_message`](Self::on_message) in the crash reporter before
+    /// [`on_minidump`](Self::on_minidump) runs, on every platform.
+    ///
+    /// # Constraints
+    ///
+    /// On Linux and Android this runs inside a signal handler on the crashing
+    /// thread. Only async-signal-safe operations are allowed: no allocation,
+    /// no locks that another thread may hold, no `println!`. Hand the work to
+    /// a thread that is already running and wait for it with a timeout.
+    ///
+    /// On Windows it runs on the faulting thread with the same limits in
+    /// practice. On macOS it runs on a handler thread while every other
+    /// thread in the process is suspended, so nothing else can do work on
+    /// the callback's behalf.
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
+    pub fn on_crash<F>(mut self, on_crash: F) -> Self
+    where
+        F: Fn(&CrashContext, &MessageSender<'_>) + Send + Sync + 'static,
+    {
+        self.on_crash = Some(Box::new(on_crash));
         self
     }
 
@@ -237,6 +284,7 @@ impl MinidumperChild {
                         self.client_connect_timeout,
                         server_process.id(),
                         self.server_stale_timeout / 2,
+                        self.on_crash,
                     )
                     .map(|(conn, handler)| ClientHandle {
                         conn,

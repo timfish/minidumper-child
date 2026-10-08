@@ -1,4 +1,4 @@
-use crate::{Error, OwnedSocketName};
+use crate::{Error, MessageSender, OnCrash, OwnedSocketName};
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
 use minidumper::Client;
 use std::{
@@ -61,13 +61,21 @@ impl ServerConnection {
         self.current_client().ping()
     }
 
-    fn request_dump(&self, crash_context: &CrashContext) -> bool {
+    fn request_dump(&self, crash_context: &CrashContext, on_crash: Option<&OnCrash>) -> bool {
         // During a real crash this runs in a signal handler, so don't risk
         // blocking on the lock forever; a dump without the lock is better
         // than no dump at all.
         let _guard = try_lock_briefly(&self.io_lock);
+        let client = self.current_client();
 
-        self.current_client().request_dump(crash_context).is_ok()
+        if let Some(on_crash) = on_crash {
+            on_crash(crash_context, &MessageSender(&client));
+        }
+        // The server answers a ping only after it has handled every
+        // earlier message on this connection, so messages sent by
+        // `on_crash` reach `on_message` before the dump is written.
+        client.ping().ok();
+        client.request_dump(crash_context).is_ok()
     }
 
     fn reconnect(&self) -> bool {
@@ -120,6 +128,7 @@ pub fn start(
     connect_timeout: Duration,
     #[allow(unused_variables)] server_pid: u32,
     server_poll: Duration,
+    on_crash: Option<OnCrash>,
 ) -> Result<(Arc<ServerConnection>, CrashHandler), Error> {
     let client = ServerConnection::connect(&socket_name, connect_timeout).map_err(|e| {
         Error::CreateClient {
@@ -155,7 +164,7 @@ pub fn start(
     let handler = CrashHandler::attach(unsafe {
         let conn = conn.clone();
         make_crash_event(move |crash_context: &CrashContext| {
-            CrashEventResult::Handled(conn.request_dump(crash_context))
+            CrashEventResult::Handled(conn.request_dump(crash_context, on_crash.as_ref()))
         })
     })
     .map_err(Error::AttachCrashHandler)?;
