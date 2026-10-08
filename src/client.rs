@@ -1,4 +1,4 @@
-use crate::{Error, OwnedSocketName};
+use crate::{Error, MessageSender, OnCrash, OwnedSocketName};
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
 use minidumper::Client;
 use std::{sync::Arc, time::Duration};
@@ -8,6 +8,7 @@ pub fn start(
     connect_timeout: Duration,
     #[allow(unused_variables)] server_pid: u32,
     server_poll: Duration,
+    on_crash: Option<OnCrash>,
 ) -> Result<(Arc<Client>, CrashHandler), Error> {
     let mut wait_time = Duration::ZERO;
 
@@ -45,6 +46,12 @@ pub fn start(
     let handler = CrashHandler::attach(unsafe {
         let client = client.clone();
         make_crash_event(move |crash_context: &CrashContext| {
+            if let Some(on_crash) = &on_crash {
+                on_crash(crash_context, &MessageSender(&client));
+            }
+            // The server answers a ping only after it has handled every
+            // earlier message on this connection, so messages sent by
+            // `on_crash` reach `on_message` before the dump is written.
             client.ping().ok();
             CrashEventResult::Handled(client.request_dump(crash_context).is_ok())
         })
