@@ -15,7 +15,7 @@ defined closure.
 
 ```toml
 [dependencies]
-minidumper-child = "0.6"
+minidumper-child = "0.7"
 ```
 
 ```rust
