@@ -13,5 +13,9 @@ minidumper = "0.10"
 thiserror = "2"
 uuid = {version = "1", features = ["v4"]}
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
+libc = "0.2"
 sadness-generator = "0.7"

@@ -53,7 +53,15 @@ pub fn start(
             // earlier message on this connection, so messages sent by
             // `on_crash` reach `on_message` before the dump is written.
             client.ping().ok();
-            CrashEventResult::Handled(client.request_dump(crash_context).is_ok())
+            let dumped = client.request_dump(crash_context).is_ok();
+            // Exit here so no signal kills the process. Otherwise the
+            // kernel raises EXC_CRASH and Apple's crash reporter shows
+            // the "quit unexpectedly" dialog. `_exit` is signal-safe.
+            #[cfg(target_os = "macos")]
+            if dumped {
+                unsafe { libc::_exit(1) };
+            }
+            CrashEventResult::Handled(dumped)
         })
     })
     .map_err(Error::AttachCrashHandler)?;

@@ -50,6 +50,15 @@ fn main() {
 }
 ```
 
+## macOS crash reporter
+
+On macOS the app process exits with status 1 as soon as the minidump has been
+written. This stops the crash signal from reaching Apple's crash reporter, so
+the "quit unexpectedly" dialog does not appear and no report is written to
+`~/Library/Logs/DiagnosticReports`. If the minidump request fails, the signal
+is passed on and the system reporter runs as before. On Linux and Windows the
+process ends the same way as it does without this crate.
+
 ## Hooks
 
 `spawn` panics unless you set at least one of `on_minidump` or `on_message`.
