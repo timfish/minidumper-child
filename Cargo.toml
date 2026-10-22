@@ -5,7 +5,7 @@ license = "MIT OR Apache-2.0"
 name = "minidumper-child"
 readme = "README.md"
 repository = "https://github.com/timfish/minidumper-child"
-version = "0.6.1"
+version = "0.7.0"
 
 [dependencies]
 crash-handler = "0.7"
@@ -13,5 +13,11 @@ minidumper = "0.10"
 thiserror = "2"
 uuid = {version = "1", features = ["v4"]}
 
+[target.'cfg(target_os = "macos")'.dependencies]
+crash-context = "0.6"
+libc = "0.2"
+mach2 = "0.4"
+
 [dev-dependencies]
+libc = "0.2"
 sadness-generator = "0.7"

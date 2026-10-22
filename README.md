@@ -15,7 +15,7 @@ defined closure.
 
 ```toml
 [dependencies]
-minidumper-child = "0.6"
+minidumper-child = "0.7"
 ```
 
 ```rust
@@ -49,6 +49,15 @@ fn main() {
     }
 }
 ```
+
+## macOS crash reporter
+
+On macOS the app process exits with status 1 as soon as the minidump has been
+written. This stops the crash signal from reaching Apple's crash reporter, so
+the "quit unexpectedly" dialog does not appear and no report is written to
+`~/Library/Logs/DiagnosticReports`. If the minidump request fails, the signal
+is passed on and the system reporter runs as before. On Linux and Windows the
+process ends the same way as it does without this crate.
 
 ## Hooks
 

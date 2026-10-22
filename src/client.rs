@@ -53,7 +53,25 @@ pub fn start(
             // earlier message on this connection, so messages sent by
             // `on_crash` reach `on_message` before the dump is written.
             client.ping().ok();
-            CrashEventResult::Handled(client.request_dump(crash_context).is_ok())
+            let dumped = match client.request_dump(crash_context) {
+                Ok(()) => true,
+                // The server has sent its ack, so the dump is written.
+                // crash-context reads the ack into a buffer with no room
+                // for the trailer the kernel adds, so the read fails.
+                #[cfg(target_os = "macos")]
+                Err(minidumper::Error::PortError(crash_context::ipc::Error::Message(
+                    mach2::message::MACH_RCV_TOO_LARGE,
+                ))) => true,
+                Err(_) => false,
+            };
+            // Exit here so no signal kills the process. Otherwise the
+            // kernel raises EXC_CRASH and Apple's crash reporter shows
+            // the "quit unexpectedly" dialog. `_exit` is signal-safe.
+            #[cfg(target_os = "macos")]
+            if dumped {
+                libc::_exit(1);
+            }
+            CrashEventResult::Handled(dumped)
         })
     })
     .map_err(Error::AttachCrashHandler)?;
