@@ -41,14 +41,54 @@ fn test_example_app() {
     }
 }
 
+// A child process inherits the task exception ports on macOS, so a child that
+// crashes after the app attached its handler reports to that handler first.
+// The handler must let the child die rather than resume it, and must not
+// write a minidump for it.
+#[cfg(target_os = "macos")]
+#[test]
+fn test_crashing_child_dies() {
+    let status = Command::new("cargo")
+        .args(["build", "--example", "crashing_child", "--release"])
+        .status()
+        .expect("should build crashing child app");
+    assert!(status.success());
+
+    let output = Command::new(example_path_named("crashing_child"))
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("should spawn crashing child app")
+        .wait_with_output()
+        .expect("failed to wait on crashing child app");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    let died = [
+        format!("child ended: signal {}", libc::SIGSEGV),
+        format!("child ended: signal {}", libc::SIGBUS),
+    ];
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        lines.len(),
+        1,
+        "only the child's end is reported: {lines:?}"
+    );
+    assert!(died.iter().any(|line| line == lines[0]), "{lines:?}");
+}
+
 fn example_path() -> PathBuf {
+    example_path_named("test")
+}
+
+fn example_path_named(name: &str) -> PathBuf {
     let target_dir = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
     let path = target_dir
         .join("release")
         .join("examples")
-        .join(format!("test{}", env::consts::EXE_SUFFIX));
+        .join(format!("{name}{}", env::consts::EXE_SUFFIX));
     assert!(fs::metadata(&path).is_ok(), "missing {}", path.display());
     path
 }
