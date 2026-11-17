@@ -18,6 +18,9 @@ crash-context = "0.6"
 libc = "0.2"
 mach2 = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = {version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"]}
+
 [dev-dependencies]
 libc = "0.2"
 sadness-generator = "0.7"

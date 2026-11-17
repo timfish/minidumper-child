@@ -3,11 +3,18 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use crate::{Error, OwnedSocketName};
+
+/// Holds the process id of the app, so the crash reporter can exit when
+/// the app does.
+pub(crate) const APP_PID_ENV: &str = "_MINIDUMPER_CHILD_APP_PID";
 
 struct Handler<Minidump, Message>
 where
@@ -88,10 +95,52 @@ where
     }
 }
 
+/// Sets `shutdown` when the app process exits.
+#[cfg(unix)]
+fn watch_app(app_pid: u32, shutdown: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        // When the app exits, this process gets a new parent
+        while std::os::unix::process::parent_id() == app_pid {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        shutdown.store(true, Ordering::Relaxed);
+    });
+}
+
+/// Sets `shutdown` when the app process exits.
+#[cfg(windows)]
+fn watch_app(app_pid: u32, shutdown: Arc<AtomicBool>) {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        System::Threading::{OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE},
+    };
+
+    // The open handle stops Windows from giving the pid to a new process
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, app_pid) };
+    if handle.is_null() {
+        // The server still exits when the app closes its socket
+        return;
+    }
+
+    // A raw pointer is not `Send`
+    let handle = handle as usize;
+    std::thread::spawn(move || {
+        unsafe {
+            WaitForSingleObject(handle as HANDLE, INFINITE);
+            CloseHandle(handle as HANDLE);
+        }
+        shutdown.store(true, Ordering::Relaxed);
+    });
+}
+
+/// Runs the crash reporter until the app exits or a minidump is written.
+///
+/// `stale_timeout` is not used. The crash reporter watches the app
+/// process instead.
 pub fn start<Minidump, Message>(
     socket_name: OwnedSocketName,
     crashes_dir: PathBuf,
-    stale_timeout: Duration,
+    _stale_timeout: Duration,
     on_minidump: Option<Minidump>,
     on_message: Option<Message>,
 ) -> Result<(), Error>
@@ -106,11 +155,20 @@ where
         })
         .and_then(|mut server| {
             let handler = Box::new(Handler::new(crashes_dir, on_minidump, on_message));
-            let shutdown = AtomicBool::new(false);
-            let stale_timeout = Some(stale_timeout);
+            let shutdown = Arc::new(AtomicBool::new(false));
 
+            if let Some(app_pid) = std::env::var(APP_PID_ENV)
+                .ok()
+                .and_then(|pid| pid.parse().ok())
+            {
+                watch_app(app_pid, shutdown.clone());
+            }
+
+            // No stale timeout. The app can stop for any length of time,
+            // for example when the OS suspends it, and must still be able
+            // to send a crash.
             server
-                .run(handler, &shutdown, stale_timeout)
+                .run(handler, &shutdown, None)
                 .map_err(Error::RunServer)
         })
 }

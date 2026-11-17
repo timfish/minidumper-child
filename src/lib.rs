@@ -174,10 +174,11 @@ impl MinidumperChild {
         self
     }
 
-    /// Configures the server stale timeout.
+    /// Does nothing.
     ///
-    /// The server expects periodic messages from the client process, if it does not receive
-    /// a message within `timeout`, it considers the connection broken and detach.
+    /// The crash reporter exits when the app process exits, so it no longer
+    /// needs a timeout.
+    #[deprecated(note = "The crash reporter now exits when the app process exits")]
     #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_server_stale_timeout(mut self, timeout: Duration) -> Self {
         self.server_stale_timeout = timeout;
@@ -234,7 +235,8 @@ impl MinidumperChild {
                     if let Some(on_process) = self.on_process {
                         on_process(&mut process);
                     }
-                    // Always set this last, so an accidental `env_clear()` doesn't remove it.
+                    // Always set these last, so an accidental `env_clear()` doesn't remove them.
+                    process.env(server::APP_PID_ENV, process::id().to_string());
                     process.env(self.server_env, socket_name.as_os_string());
                     process.spawn()
                 })

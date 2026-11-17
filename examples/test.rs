@@ -26,7 +26,14 @@ fn main() {
         .spawn();
     // Everything after here runs in only the app process
 
-    // Wait for longer than the default server timeout
+    // Waits for the test to kill this process
+    if std::env::args().any(|arg| arg == "--wait") {
+        println!("ready");
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        return;
+    }
+
+    // Send no messages for longer than the old server stale timeout
     std::thread::sleep(std::time::Duration::from_secs(10));
 
     unsafe { sadness_generator::raise_segfault() };
