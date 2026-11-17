@@ -12,10 +12,6 @@ use std::{
 
 use crate::{Error, OwnedSocketName};
 
-/// Holds the process id of the app, so the crash reporter can exit when
-/// the app does.
-pub(crate) const APP_PID_ENV: &str = "_MINIDUMPER_CHILD_APP_PID";
-
 struct Handler<Minidump, Message>
 where
     Minidump: Fn(Vec<u8>, &Path) + Send + Sync + 'static,
@@ -133,14 +129,29 @@ fn watch_app(app_pid: u32, shutdown: Arc<AtomicBool>) {
     });
 }
 
-/// Runs the crash reporter until the app exits or a minidump is written.
+/// Runs the crash reporter until the app closes its socket or a minidump
+/// is written.
 ///
-/// `stale_timeout` is not used. The crash reporter watches the app
-/// process instead.
+/// `stale_timeout` is not used.
 pub fn start<Minidump, Message>(
     socket_name: OwnedSocketName,
     crashes_dir: PathBuf,
     _stale_timeout: Duration,
+    on_minidump: Option<Minidump>,
+    on_message: Option<Message>,
+) -> Result<(), Error>
+where
+    Minidump: Fn(Vec<u8>, &Path) + Send + Sync + 'static,
+    Message: Fn(u32, Vec<u8>) + Send + Sync + 'static,
+{
+    run(socket_name, crashes_dir, None, on_minidump, on_message)
+}
+
+/// Runs the crash reporter until the app exits or a minidump is written.
+pub(crate) fn run<Minidump, Message>(
+    socket_name: OwnedSocketName,
+    crashes_dir: PathBuf,
+    app_pid: Option<u32>,
     on_minidump: Option<Minidump>,
     on_message: Option<Message>,
 ) -> Result<(), Error>
@@ -157,10 +168,7 @@ where
             let handler = Box::new(Handler::new(crashes_dir, on_minidump, on_message));
             let shutdown = Arc::new(AtomicBool::new(false));
 
-            if let Some(app_pid) = std::env::var(APP_PID_ENV)
-                .ok()
-                .and_then(|pid| pid.parse().ok())
-            {
+            if let Some(app_pid) = app_pid {
                 watch_app(app_pid, shutdown.clone());
             }
 

@@ -209,14 +209,21 @@ impl MinidumperChild {
             panic!("You should set one of 'on_minidump' or 'on_message'");
         }
 
+        // Passes the app process id to the crash reporter
+        let app_pid_env = format!("{}_PID", self.server_env);
+
         if let Some(socket_name) = std::env::var_os(&self.server_env) {
             let socket_name = OwnedSocketName::from_os_str(&socket_name)
                 .ok_or(Error::InvalidSocketName(socket_name))?;
 
-            server::start(
+            let app_pid = std::env::var(&app_pid_env)
+                .ok()
+                .and_then(|pid| pid.parse().ok());
+
+            server::run(
                 socket_name,
                 self.crashes_dir,
-                self.server_stale_timeout,
+                app_pid,
                 self.on_minidump,
                 self.on_message,
             )?;
@@ -236,7 +243,7 @@ impl MinidumperChild {
                         on_process(&mut process);
                     }
                     // Always set these last, so an accidental `env_clear()` doesn't remove them.
-                    process.env(server::APP_PID_ENV, process::id().to_string());
+                    process.env(&app_pid_env, process::id().to_string());
                     process.env(self.server_env, socket_name.as_os_string());
                     process.spawn()
                 })
