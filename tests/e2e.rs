@@ -1,16 +1,13 @@
 use std::{
     env, fs,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
+    time::Duration,
 };
 
 #[test]
 fn test_example_app() {
-    let status = Command::new("cargo")
-        .args(["build", "--example", "test", "--release"])
-        .status()
-        .expect("should build test app");
-    assert!(status.success());
+    build_example();
 
     // Run the binary directly so its exit status is visible
     let output = Command::new(example_path())
@@ -20,6 +17,44 @@ fn test_example_app() {
         .wait_with_output()
         .expect("failed to wait on test app");
 
+    check_output(&output);
+}
+
+// The server times out while the app is stopped. The app must start a new
+// server and still write a minidump.
+#[cfg(unix)]
+#[test]
+fn test_example_app_after_server_timeout() {
+    build_example();
+
+    let child = Command::new(example_path())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("should spawn test app");
+    let pid = child.id() as libc::pid_t;
+
+    std::thread::sleep(Duration::from_secs(1));
+    // Longer than the default server stale timeout of 5 seconds
+    unsafe { libc::kill(pid, libc::SIGSTOP) };
+    std::thread::sleep(Duration::from_secs(7));
+    unsafe { libc::kill(pid, libc::SIGCONT) };
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait on test app");
+
+    check_output(&output);
+}
+
+fn build_example() {
+    let status = Command::new("cargo")
+        .args(["build", "--example", "test", "--release"])
+        .status()
+        .expect("should build test app");
+    assert!(status.success());
+}
+
+fn check_output(output: &Output) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
 

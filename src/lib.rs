@@ -38,16 +38,26 @@ pub enum Error {
 }
 
 pub struct ClientHandle {
-    client: Arc<minidumper::Client>,
-    _handler: crash_handler::CrashHandler,
-    _child: process::Child,
+    handler: client::SharedHandler,
+    connection: Arc<client::Connection>,
 }
 
 impl ClientHandle {
     pub fn send_message(&self, kind: u32, buf: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.client
-            .send_message(kind, buf)
-            .map_err(Error::SendMessage)
+        let client = self.connection.current().ok_or_else(|| {
+            Error::SendMessage(std::io::Error::from(std::io::ErrorKind::NotConnected).into())
+        })?;
+        client.send_message(kind, buf).map_err(Error::SendMessage)
+    }
+}
+
+impl Drop for ClientHandle {
+    fn drop(&mut self) {
+        // Detaches the crash handler and stops the ping thread
+        self.handler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
     }
 }
 
@@ -224,35 +234,23 @@ impl MinidumperChild {
             // crash reporter process.
             std::process::exit(0);
         } else {
-            // We use a unique socket name because we don't share the crash reporter
-            // processes between different instances of the app.
-            let socket_name = OwnedSocketName::new(&std::env::temp_dir(), uuid::Uuid::new_v4());
+            let mut command =
+                process::Command::new(std::env::current_exe().map_err(Error::SpawnProcess)?);
+            if let Some(on_process) = self.on_process {
+                on_process(&mut command);
+            }
 
-            std::env::current_exe()
-                .and_then(|current_exe| {
-                    let mut process = process::Command::new(current_exe);
-                    if let Some(on_process) = self.on_process {
-                        on_process(&mut process);
-                    }
-                    // Always set this last, so an accidental `env_clear()` doesn't remove it.
-                    process.env(self.server_env, socket_name.as_os_string());
-                    process.spawn()
-                })
-                .map_err(Error::SpawnProcess)
-                .and_then(|server_process| {
-                    client::start(
-                        socket_name,
-                        self.client_connect_timeout,
-                        server_process.id(),
-                        self.server_stale_timeout / 2,
-                        self.on_crash,
-                    )
-                    .map(|(client, handler)| ClientHandle {
-                        client,
-                        _handler: handler,
-                        _child: server_process,
-                    })
-                })
+            client::start(
+                command,
+                self.server_env,
+                self.client_connect_timeout,
+                self.server_stale_timeout / 2,
+                self.on_crash,
+            )
+            .map(|(connection, handler)| ClientHandle {
+                handler,
+                connection,
+            })
         }
     }
 }
