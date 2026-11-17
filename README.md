@@ -96,9 +96,11 @@ the crash reporter process.
 | Method | Default | Purpose |
 | --- | --- | --- |
 | `with_crashes_dir` | `<temp dir>/Crashes` | Directory where minidump files are written |
-| `with_server_stale_timeout` | 5 s | How long the crash reporter waits for a message before it exits |
 | `with_client_connect_timeout` | 3 s | How long the app waits to connect to the crash reporter |
 | `with_server_env_var` | `_CRASH_REPORTER_SERVER` | Environment variable that marks the crash reporter process |
+
+The crash reporter exits when the app process exits, so it needs no timeout.
+`with_server_stale_timeout` is deprecated and does nothing.
 
 Call `is_crash_reporter_process` to find out which process you are in before
 `spawn`.
