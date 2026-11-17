@@ -5,13 +5,23 @@ use std::{sync::Arc, time::Duration};
 
 /// Connects to the crash reporter and attaches the crash handler.
 ///
-/// `server_poll` is not used. The crash reporter watches the app process,
-/// so the app does not need to ping it.
+/// `server_poll` is not used. The app no longer pings the crash reporter.
+#[deprecated(note = "Use `MinidumperChild::spawn`. This module will become private")]
 pub fn start(
     socket_name: OwnedSocketName,
     connect_timeout: Duration,
-    #[allow(unused_variables)] server_pid: u32,
+    server_pid: u32,
     _server_poll: Duration,
+    on_crash: Option<OnCrash>,
+) -> Result<(Arc<Client>, CrashHandler), Error> {
+    connect(socket_name, connect_timeout, server_pid, on_crash)
+}
+
+/// Connects to the crash reporter and attaches the crash handler.
+pub(crate) fn connect(
+    socket_name: OwnedSocketName,
+    connect_timeout: Duration,
+    #[allow(unused_variables)] server_pid: u32,
     on_crash: Option<OnCrash>,
 ) -> Result<(Arc<Client>, CrashHandler), Error> {
     let mut wait_time = Duration::ZERO;

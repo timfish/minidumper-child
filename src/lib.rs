@@ -72,7 +72,6 @@ pub type OnCrash = Box<dyn Fn(&CrashContext, &MessageSender<'_>) + Send + Sync +
 
 pub struct MinidumperChild {
     crashes_dir: PathBuf,
-    server_stale_timeout: Duration,
     client_connect_timeout: Duration,
     server_env: String,
     on_process: Option<OnProcess>,
@@ -85,7 +84,6 @@ impl Default for MinidumperChild {
     fn default() -> Self {
         Self {
             crashes_dir: std::env::temp_dir().join("Crashes"),
-            server_stale_timeout: Duration::from_millis(5000),
             client_connect_timeout: Duration::from_millis(3000),
             server_env: "_CRASH_REPORTER_SERVER".to_owned(),
             on_process: None,
@@ -180,8 +178,7 @@ impl MinidumperChild {
     /// needs a timeout.
     #[deprecated(note = "The crash reporter now exits when the app process exits")]
     #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
-    pub fn with_server_stale_timeout(mut self, timeout: Duration) -> Self {
-        self.server_stale_timeout = timeout;
+    pub fn with_server_stale_timeout(self, _timeout: Duration) -> Self {
         self
     }
 
@@ -249,11 +246,10 @@ impl MinidumperChild {
                 })
                 .map_err(Error::SpawnProcess)
                 .and_then(|server_process| {
-                    client::start(
+                    client::connect(
                         socket_name,
                         self.client_connect_timeout,
                         server_process.id(),
-                        self.server_stale_timeout / 2,
                         self.on_crash,
                     )
                     .map(|(client, handler)| ClientHandle {

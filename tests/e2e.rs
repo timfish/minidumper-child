@@ -48,7 +48,8 @@ fn test_example_app_after_stop() {
     check_crash_output(&output);
 }
 
-// The crash reporter must exit soon after the app is killed
+// The crash reporter must exit soon after the app is killed. Killing the
+// app closes its socket, so this covers the socket path.
 #[test]
 fn test_crash_reporter_exits_with_app() {
     build_example();
@@ -67,19 +68,72 @@ fn test_crash_reporter_exits_with_app() {
     child.kill().expect("should kill test app");
     child.wait().expect("failed to wait on test app");
 
-    // The crash reporter shares the stdout pipe, so the pipe closes when
-    // the crash reporter exits.
+    let rest = read_to_end_within(stdout, Duration::from_secs(5))
+        .expect("crash reporter should exit after the app is killed");
+    assert_eq!(rest, "");
+}
+
+// A forked process keeps the app's socket open after the app is killed, so
+// only the app watcher in the crash reporter can end it.
+#[cfg(unix)]
+#[test]
+fn test_crash_reporter_watches_app() {
+    build_example();
+
+    let mut child = Command::new(example_path())
+        .arg("--fork-wait")
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("should spawn test app");
+
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    stdout.read_line(&mut line).expect("should read from app");
+    let fork_pid: libc::pid_t = line
+        .trim_end()
+        .strip_prefix("ready ")
+        .and_then(|pid| pid.parse().ok())
+        .expect("app should print the forked pid");
+
+    child.kill().expect("should kill test app");
+    child.wait().expect("failed to wait on test app");
+
+    let rest = read_to_end_within(stdout, Duration::from_secs(5));
+    unsafe { libc::kill(fork_pid, libc::SIGKILL) };
+
+    let rest = rest.expect("crash reporter should exit after the app is killed");
+    assert_eq!(rest, "");
+}
+
+// The app sends messages and exits at once. The crash reporter must handle
+// every message before it exits, even when each one is slow.
+#[test]
+fn test_messages_sent_before_exit_arrive() {
+    build_example();
+
+    let output = Command::new(example_path())
+        .arg("--send-and-exit")
+        .env("TEST_SLOW_MESSAGES", "1")
+        .stdout(Stdio::piped())
+        .output()
+        .expect("should run test app");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected: Vec<String> = (0..10)
+        .map(|kind| format!("message kind={kind} len=1"))
+        .collect();
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), expected);
+}
+
+/// Reads until the crash reporter exits and closes the shared stdout pipe.
+fn read_to_end_within(mut stdout: impl Read + Send + 'static, timeout: Duration) -> Option<String> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut rest = String::new();
         stdout.read_to_string(&mut rest).ok();
         tx.send(rest).ok();
     });
-
-    let rest = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("crash reporter should exit after the app is killed");
-    assert_eq!(rest, "");
+    rx.recv_timeout(timeout).ok()
 }
 
 fn build_example() {
