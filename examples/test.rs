@@ -15,6 +15,10 @@ fn main() {
 
             sender.send_message(7, &thread_id.to_le_bytes()).ok();
         })
+        .on_restart(|sender| {
+            // Runs in the app process after a new crash reporter starts
+            sender.send_message(9, b"restart").ok();
+        })
         .on_message(|kind, buffer| {
             // Arrives in the crash reporter before on_minidump
             println!("message kind={kind} len={}", buffer.len());

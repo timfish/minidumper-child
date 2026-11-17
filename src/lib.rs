@@ -61,15 +61,17 @@ impl Drop for ClientHandle {
     }
 }
 
-/// Sends messages to the crash reporter from inside the crash handler.
+/// Sends messages to the crash reporter from inside a callback.
 ///
-/// Passed to the [`on_crash`](MinidumperChild::on_crash) callback. Each call
-/// is a single vectored write of the caller's buffer and allocates nothing.
+/// Passed to the [`on_crash`](MinidumperChild::on_crash) and
+/// [`on_restart`](MinidumperChild::on_restart) callbacks. Each call is a
+/// single vectored write of the caller's buffer and allocates nothing.
 pub struct MessageSender<'a>(&'a minidumper::Client);
 
 impl MessageSender<'_> {
     /// Sends a message that arrives at [`on_message`](MinidumperChild::on_message)
-    /// in the crash reporter before the minidump is written.
+    /// in the crash reporter. From `on_crash`, it arrives before the
+    /// minidump is written.
     pub fn send_message(&self, kind: u32, buf: &[u8]) -> Result<(), Error> {
         self.0.send_message(kind, buf).map_err(Error::SendMessage)
     }
@@ -79,6 +81,7 @@ pub type OnProcess = Box<dyn FnOnce(&mut process::Command) + Send + Sync + 'stat
 pub type OnMinidump = Box<dyn Fn(Vec<u8>, &Path) + Send + Sync + 'static>;
 pub type OnMessage = Box<dyn Fn(u32, Vec<u8>) + Send + Sync + 'static>;
 pub type OnCrash = Box<dyn Fn(&CrashContext, &MessageSender<'_>) + Send + Sync + 'static>;
+pub type OnRestart = Box<dyn Fn(&MessageSender<'_>) + Send + Sync + 'static>;
 
 pub struct MinidumperChild {
     crashes_dir: PathBuf,
@@ -89,6 +92,7 @@ pub struct MinidumperChild {
     on_minidump: Option<OnMinidump>,
     on_message: Option<OnMessage>,
     on_crash: Option<OnCrash>,
+    on_restart: Option<OnRestart>,
 }
 
 impl Default for MinidumperChild {
@@ -102,6 +106,7 @@ impl Default for MinidumperChild {
             on_minidump: None,
             on_message: None,
             on_crash: None,
+            on_restart: None,
         }
     }
 }
@@ -177,6 +182,29 @@ impl MinidumperChild {
         self
     }
 
+    /// Configures a callback which runs in the app process after a new
+    /// crash reporter process has started.
+    ///
+    /// If a ping to the crash reporter fails, the app starts a new crash
+    /// reporter. This happens when the OS suspends the app for longer than
+    /// the [server stale timeout](Self::with_server_stale_timeout) or when
+    /// the crash reporter process is killed. The new crash reporter has
+    /// none of the state that earlier messages gave the old one. Send that
+    /// state again from here with the [`MessageSender`].
+    ///
+    /// The callback runs on the ping thread, after the new crash reporter
+    /// is connected. [`ClientHandle::send_message`] on other threads can
+    /// run at the same time, so a message sent here can arrive after a
+    /// newer one. Use a lock if the order matters.
+    #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
+    pub fn on_restart<F>(mut self, on_restart: F) -> Self
+    where
+        F: Fn(&MessageSender<'_>) + Send + Sync + 'static,
+    {
+        self.on_restart = Some(Box::new(on_restart));
+        self
+    }
+
     /// Configures the directory where crash dumps will be stored.
     #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
     pub fn with_crashes_dir(mut self, crashes_dir: PathBuf) -> Self {
@@ -246,6 +274,7 @@ impl MinidumperChild {
                 self.client_connect_timeout,
                 self.server_stale_timeout / 2,
                 self.on_crash,
+                self.on_restart,
             )
             .map(|(connection, handler)| ClientHandle {
                 handler,

@@ -87,9 +87,19 @@ See the `on_crash` documentation for the limits on each platform.
 
 ### `on_process`
 
-Runs once in the app process before the crash reporter is spawned. It gets the
-`Command` so you can change the arguments, environment or standard streams of
-the crash reporter process.
+Runs once in the app process before the crash reporter is first spawned. It
+gets the `Command` so you can change the arguments, environment or standard
+streams of the crash reporter process. A restarted crash reporter uses the same
+`Command`.
+
+### `on_restart`
+
+Runs in the app process after a new crash reporter has started. The app starts
+a new one when a ping fails, for example when the OS suspends the app for
+longer than the server stale timeout. The new crash reporter has none of the
+state that earlier messages gave the old one, so send that state again with the
+`MessageSender`. It runs on the ping thread at the same time as other threads
+can call `send_message`. Use a lock if the order of messages matters.
 
 ## Options
 

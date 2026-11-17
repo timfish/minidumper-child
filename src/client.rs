@@ -1,4 +1,4 @@
-use crate::{Error, MessageSender, OnCrash, OwnedSocketName};
+use crate::{Error, MessageSender, OnCrash, OnRestart, OwnedSocketName};
 use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandler};
 use minidumper::Client;
 use std::{
@@ -101,6 +101,7 @@ pub(crate) fn start(
     connect_timeout: Duration,
     server_poll: Duration,
     on_crash: Option<OnCrash>,
+    on_restart: Option<OnRestart>,
 ) -> Result<(Arc<Connection>, SharedHandler), Error> {
     let (client, mut child) = spawn_server(&mut command, &server_env, connect_timeout)?;
 
@@ -181,23 +182,31 @@ pub(crate) fn start(
                 },
             );
 
-            let handler = lock(&handler);
-            let Some(_handler) = &*handler else {
-                return;
-            };
-
-            match new_server {
-                Ok((client, new_child)) => {
-                    #[cfg(target_os = "linux")]
-                    _handler.set_ptracer(Some(new_child.id()));
-                    connection.set(Some(client));
-                    child = new_child;
-                }
-                Err(_) => {
-                    // A server that fails at start would fail again
-                    connection.set(None);
+            {
+                let handler = lock(&handler);
+                let Some(_handler) = &*handler else {
                     return;
+                };
+
+                match new_server {
+                    Ok((client, new_child)) => {
+                        #[cfg(target_os = "linux")]
+                        _handler.set_ptracer(Some(new_child.id()));
+                        connection.set(Some(client));
+                        child = new_child;
+                    }
+                    Err(_) => {
+                        // A server that fails at start would fail again
+                        connection.set(None);
+                        return;
+                    }
                 }
+            }
+
+            // Runs without the lock, so the callback can drop the
+            // `ClientHandle` without a deadlock.
+            if let (Some(on_restart), Some(client)) = (&on_restart, connection.current()) {
+                on_restart(&MessageSender(client));
             }
         }
     });

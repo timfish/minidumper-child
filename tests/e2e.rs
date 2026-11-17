@@ -17,7 +17,7 @@ fn test_example_app() {
         .wait_with_output()
         .expect("failed to wait on test app");
 
-    check_output(&output);
+    check_output(&output, false);
 }
 
 // The server times out while the app is stopped. The app must start a new
@@ -43,7 +43,7 @@ fn test_example_app_after_server_timeout() {
         .wait_with_output()
         .expect("failed to wait on test app");
 
-    check_output(&output);
+    check_output(&output, true);
 }
 
 fn build_example() {
@@ -54,9 +54,14 @@ fn build_example() {
     assert!(status.success());
 }
 
-fn check_output(output: &Output) {
+fn check_output(output: &Output, restarted: bool) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
+
+    // The message sent from on_restart reaches the new crash reporter
+    if restarted {
+        assert_eq!(lines.next(), Some("message kind=9 len=7"));
+    }
 
     // The message sent from on_crash arrives before the minidump
     assert_eq!(lines.next(), Some("message kind=7 len=8"));
