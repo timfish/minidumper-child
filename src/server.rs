@@ -22,11 +22,20 @@ struct Activity {
 
 impl Activity {
     fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        // Clears `busy` on drop, so a callback that panics does not
+        // leave the server marked as busy.
+        struct Done<'a>(&'a Activity);
+
+        impl Drop for Done<'_> {
+            fn drop(&mut self) {
+                self.0.calls.fetch_add(1, Ordering::SeqCst);
+                self.0.busy.store(false, Ordering::SeqCst);
+            }
+        }
+
         self.busy.store(true, Ordering::SeqCst);
-        let result = f();
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        self.busy.store(false, Ordering::SeqCst);
-        result
+        let _done = Done(self);
+        f()
     }
 
     /// Returns when no call has run for `quiet`.
@@ -254,4 +263,22 @@ where
                 .run(handler, &shutdown, None)
                 .map_err(Error::RunServer)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Activity;
+    use std::{
+        panic::{catch_unwind, AssertUnwindSafe},
+        sync::atomic::Ordering,
+    };
+
+    #[test]
+    fn activity_is_not_busy_after_a_panic() {
+        let activity = Activity::default();
+        let result = catch_unwind(AssertUnwindSafe(|| activity.run(|| panic!("callback"))));
+        assert!(result.is_err());
+        assert!(!activity.busy.load(Ordering::SeqCst));
+        assert_eq!(activity.calls.load(Ordering::SeqCst), 1);
+    }
 }
