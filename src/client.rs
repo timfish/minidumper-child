@@ -3,11 +3,25 @@ use crash_handler::{make_crash_event, CrashContext, CrashEventResult, CrashHandl
 use minidumper::Client;
 use std::{sync::Arc, time::Duration};
 
+/// Connects to the crash reporter and attaches the crash handler.
+///
+/// `server_poll` is not used. The app no longer pings the crash reporter.
+#[deprecated(note = "Use `MinidumperChild::spawn`. This module will become private")]
 pub fn start(
     socket_name: OwnedSocketName,
     connect_timeout: Duration,
+    server_pid: u32,
+    _server_poll: Duration,
+    on_crash: Option<OnCrash>,
+) -> Result<(Arc<Client>, CrashHandler), Error> {
+    connect(socket_name, connect_timeout, server_pid, on_crash)
+}
+
+/// Connects to the crash reporter and attaches the crash handler.
+pub(crate) fn connect(
+    socket_name: OwnedSocketName,
+    connect_timeout: Duration,
     #[allow(unused_variables)] server_pid: u32,
-    server_poll: Duration,
     on_crash: Option<OnCrash>,
 ) -> Result<(Arc<Client>, CrashHandler), Error> {
     let mut wait_time = Duration::ZERO;
@@ -30,18 +44,6 @@ pub fn start(
             }
         }
     };
-
-    // Start a thread that pings the server so that it doesn't timeout and exit
-    std::thread::spawn({
-        let client = client.clone();
-        move || loop {
-            std::thread::sleep(server_poll);
-
-            if client.ping().is_err() {
-                break;
-            }
-        }
-    });
 
     let handler = CrashHandler::attach(unsafe {
         let client = client.clone();

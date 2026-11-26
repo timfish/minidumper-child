@@ -72,7 +72,6 @@ pub type OnCrash = Box<dyn Fn(&CrashContext, &MessageSender<'_>) + Send + Sync +
 
 pub struct MinidumperChild {
     crashes_dir: PathBuf,
-    server_stale_timeout: Duration,
     client_connect_timeout: Duration,
     server_env: String,
     on_process: Option<OnProcess>,
@@ -85,7 +84,6 @@ impl Default for MinidumperChild {
     fn default() -> Self {
         Self {
             crashes_dir: std::env::temp_dir().join("Crashes"),
-            server_stale_timeout: Duration::from_millis(5000),
             client_connect_timeout: Duration::from_millis(3000),
             server_env: "_CRASH_REPORTER_SERVER".to_owned(),
             on_process: None,
@@ -174,13 +172,13 @@ impl MinidumperChild {
         self
     }
 
-    /// Configures the server stale timeout.
+    /// Does nothing.
     ///
-    /// The server expects periodic messages from the client process, if it does not receive
-    /// a message within `timeout`, it considers the connection broken and detach.
+    /// The crash reporter exits when the app process exits, so it no longer
+    /// needs a timeout.
+    #[deprecated(note = "The crash reporter now exits when the app process exits")]
     #[must_use = "You should call spawn() or the crash reporter won't be enabled"]
-    pub fn with_server_stale_timeout(mut self, timeout: Duration) -> Self {
-        self.server_stale_timeout = timeout;
+    pub fn with_server_stale_timeout(self, _timeout: Duration) -> Self {
         self
     }
 
@@ -208,14 +206,21 @@ impl MinidumperChild {
             panic!("You should set one of 'on_minidump' or 'on_message'");
         }
 
+        // Passes the app process id to the crash reporter
+        let app_pid_env = format!("{}_PID", self.server_env);
+
         if let Some(socket_name) = std::env::var_os(&self.server_env) {
             let socket_name = OwnedSocketName::from_os_str(&socket_name)
                 .ok_or(Error::InvalidSocketName(socket_name))?;
 
-            server::start(
+            let app_pid = std::env::var(&app_pid_env)
+                .ok()
+                .and_then(|pid| pid.parse().ok());
+
+            server::run(
                 socket_name,
                 self.crashes_dir,
-                self.server_stale_timeout,
+                app_pid,
                 self.on_minidump,
                 self.on_message,
             )?;
@@ -234,17 +239,17 @@ impl MinidumperChild {
                     if let Some(on_process) = self.on_process {
                         on_process(&mut process);
                     }
-                    // Always set this last, so an accidental `env_clear()` doesn't remove it.
+                    // Always set these last, so an accidental `env_clear()` doesn't remove them.
+                    process.env(&app_pid_env, process::id().to_string());
                     process.env(self.server_env, socket_name.as_os_string());
                     process.spawn()
                 })
                 .map_err(Error::SpawnProcess)
                 .and_then(|server_process| {
-                    client::start(
+                    client::connect(
                         socket_name,
                         self.client_connect_timeout,
                         server_process.id(),
-                        self.server_stale_timeout / 2,
                         self.on_crash,
                     )
                     .map(|(client, handler)| ClientHandle {
